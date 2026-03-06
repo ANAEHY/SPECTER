@@ -29,10 +29,10 @@ jobs:
       - name: Update Tariff 20
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: python update_tariff20_cloud.py
+        run: python update_keys.py
 
       - name: Success notification
         if: success()
         run: |
           echo "keys.txt updated!"
-          echo "https://raw.githubusercontent.com/spermoeshka/NEW_SRECTER/main/keys.txt"
+          echo "https://raw.githubusercontent.com/ANAEHY/SPECTER/main/keys.txt"
