@@ -27,7 +27,7 @@ SNI_CIDR_SOURCES = [
     'https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/WHITE-SNI-RU-all.txt'
 ]
 
-HEADER = """#profile-title: base64:8J+ktCBTUEVDVEVSIFRhcmlmIDIw
+HEADER = """#profile-title: base64:8J+RuyBTUEVDVEVSIFZQTg==
 #profile-update-interval: 12"""
 
 # ══════════════════════════════════════════════════════════════════
