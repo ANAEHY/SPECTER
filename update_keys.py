@@ -380,7 +380,36 @@ print(f"\n📊 Статистика LTE по операторам:")
 for ops, count in sorted(ops_stat.items(), key=lambda x: -x[1])[:8]:
     print(f"     {ops}: {count} ключей")
 
-# ── 4. ФИНАЛЬНАЯ СБОРКА ───────────────────────────────────────────
+# ── 4. ДОПОЛНИТЕЛЬНЫЕ ИСТОЧНИКИ (по 3 из каждого) ───────────────
+EXTRA_SOURCES = [
+    'https://raw.githubusercontent.com/whoahaow/rjsxrd/main/githubmirror/bypass/bypass-all.txt',
+    'https://raw.githubusercontent.com/zieng2/wl/main/vless_lite.txt',
+]
+EXTRA_GOOD_SNI = list(SNI_OPERATORS.keys())
+
+print("\n📥 ДОПОЛНИТЕЛЬНЫЕ ИСТОЧНИКИ (по 3 ключа):")
+extra_configs = []
+for source in EXTRA_SOURCES:
+    source_name = source.split('/')[-1]
+    try:
+        resp = requests.get(source, timeout=10)
+        lines = [l.strip() for l in resp.text.splitlines() if l.strip() and l.strip().startswith('vless://')]
+        good_lines = []
+        for line in lines:
+            if is_cloudflare(line) or is_bad_key(line):
+                continue
+            sni = get_sni(line)
+            if any(good in sni for good in EXTRA_GOOD_SNI):
+                good_lines.append(line)
+        selected = random.sample(good_lines, min(3, len(good_lines))) if good_lines else []
+        extra_configs.extend(selected)
+        print(f"     ✅ {source_name}: найдено {len(good_lines)} хороших, берём {len(selected)}")
+    except Exception as e:
+        print(f"     ❌ {source_name}: {e}")
+
+extra_renamed = [rename_lte_key(line) for line in extra_configs]
+
+# ── 5. ФИНАЛЬНАЯ СБОРКА ───────────────────────────────────────────
 final_configs = []
 for country in ['DE', 'NL', 'FR', 'RU']:
     final_configs.extend(collected_blocks[country])
@@ -388,10 +417,11 @@ for country in selected_random:
     final_configs.extend(random_countries[country][:1])
 final_configs.extend(sni_cidr_renamed[:25])
 final_configs.extend(sni_cidr_ee_renamed[:3])
-final_configs = final_configs[:60]
+final_configs.extend(extra_renamed)
+final_configs = final_configs[:66]
 
 content = HEADER + '\n' + '\n'.join(final_configs)
 print(f"\n🎯 ИТОГО: {len(final_configs)} серверов")
 
-# ── 5. СОХРАНЯЕМ В GITHUB ────────────────────────────────────────
+# ── 6. СОХРАНЯЕМ В GITHUB ────────────────────────────────────────
 save_to_github(content)
