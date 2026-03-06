@@ -4,15 +4,15 @@ import re
 import os
 import base64
 from collections import defaultdict
-from urllib.parse import urlparse, urlunparse, quote, unquote
+from urllib.parse import urlparse, urlunparse, quote, unquote, parse_qs
 
 # ===== GITHUB НАСТРОЙКИ =====
-GITHUB_TOKEN = os.getenv('GITHUB_TOKEN')   # секрет в GitHub Actions
-GITHUB_REPO  = 'ANAEHY/SPECTER'
-GITHUB_FILE  = 'keys.txt'                  # имя файла (латиницей!)
+GITHUB_TOKEN  = os.getenv('GITHUB_TOKEN')
+GITHUB_REPO   = 'ANAEHY/SPECTER'
+GITHUB_FILE   = 'keys.txt'
 GITHUB_BRANCH = 'main'
 
-# ===== ПРИОРИТЕТНЫЕ ИСТОЧНИКИ =====
+# ===== ИСТОЧНИКИ =====
 PRIORITY_SOURCES = [
     'https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/BLACK_SS+All_RUS.txt',
     'https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/BLACK_VLESS_RUS.txt',
@@ -31,7 +31,65 @@ HEADER = """#profile-title: base64:8J+RuyBTUEVDVEVSIFZQTg==
 #profile-update-interval: 12"""
 
 # ══════════════════════════════════════════════════════════════════
-#  СЛОВАРИ
+#  SNI → ОПЕРАТОРЫ (актуально 2025-2026, источник: 4pda)
+# ══════════════════════════════════════════════════════════════════
+
+SNI_OPERATORS = {
+    'stats.vk-portal.net':          'МТС·Мега·Теле2·Йота·РТК',
+    'sun6-21.userapi.com':          'МТС·Мега·Теле2·Йота·РТК',
+    'sun6-20.userapi.com':          'МТС·Мега·Теле2·РТК',
+    'sun6-22.userapi.com':          'МТС·Мега·Теле2·РТК',
+    'queuev4.vk.com':               'МТС·Мега·Теле2·Йота·РТК',
+    'login.vk.com':                 'МТС·Мега·Теле2·РТК',
+    'eh.vk.com':                    'МТС·Мега·Теле2·Йота·РТК',
+    'eh.vk.ru':                     'МТС·Мега·Теле2·Йота·РТК',
+    'vk.com':                       'МТС·Мега·Теле2·Йота',
+    'www.vk.com':                   'МТС·Мега·Теле2·Йота',
+    'tunnel.vk-apps.com':           'МТС·Мега·Теле2·Йота',
+    'akashi.vk-portal.net':         'МТС',
+    'ok.ru':                        'МТС·Мегафон',
+    'yandex.ru':                    'МТС·Мега·Теле2',
+    'sba.yandex.net':               'МТС·Мегафон',
+    'speller.yandex.net':           'МТС·Мега·Теле2·Йота·РТК',
+    'egress.yandex.net':            'МТС·Мега·Теле2·РТК',
+    'yastatic.net':                 'МТС·Мега·Теле2·РТК',
+    'csp.yandex.net':               'МТС·Мега·Теле2·РТК',
+    'avatars.mds.yandex.net':       'МТС·Мега·Теле2·РТК',
+    'api-maps.yandex.ru':           'МТС·Мега·Теле2·РТК',
+    'dzen.ru':                      'Мегафон·Теле2',
+    'www.kinopoisk.ru':             'МТС·Мега·Теле2·Йота·РТК',
+    'goya.rutube.ru':               'МТС·Мега·Теле2·РТК',
+    'st.ozone.ru':                  'МТС·Мега·Теле2·Йота·РТК',
+    'www.ozon.ru':                  'МТС·Мега·Теле2',
+    'splitter.wb.ru':               'МТС·Мега·Теле2·Йота·РТК',
+    'www.wildberries.ru':           'МТС·Мега·Теле2·РТК',
+    'alfabank.ru':                  'МТС·Мега·Теле2·Йота',
+    'online.sberbank.ru':           'МТС·Мега·Теле2·РТК',
+    'www.tbank.ru':                 'МТС·Мега·Теле2',
+    'id.tbank.ru':                  'МТС·Мега·Теле2',
+    'nspk.ru':                      'МТС·Мега·Теле2·РТК',
+    '2gis.ru':                      'МТС·Мега·Теле2',
+    'sntr.avito.ru':                'МТС·Мега·Теле2',
+    'hh.ru':                        'МТС·Мега·Теле2',
+    'rbc.ru':                       'МТС·Мега·РТК',
+    'www.rbc.ru':                   'МТС·Мега·РТК',
+    'lenta.ru':                     'МТС·Мега·Теле2',
+    'max.ru':                       'МТС·Мега·Теле2',
+    'ads.x5.ru':                    'МТС·Мега·Теле2',
+    'storage.yandexcloud.net':      'МТС·Мега·Теле2·РТК',
+    'www.t2.ru':                    'Теле2',
+    'msk.t2.ru':                    'Теле2',
+    'login.mts.ru':                 'МТС',
+    'moscow.megafon.ru':            'Мегафон',
+}
+
+BAD_PATTERNS = [
+    'compass/cdn', 'microsoft', 'booking', 'tradingview',
+    'jkvpn', 'pabloping', 'hediiigate', 'oboob'
+]
+
+# ══════════════════════════════════════════════════════════════════
+#  СЛОВАРИ СТРАН
 # ══════════════════════════════════════════════════════════════════
 
 COUNTRY_RU = {
@@ -104,9 +162,23 @@ def get_flag_and_country(fragment: str):
             return "🌐", rus
     return "🌐", "Сервер"
 
+def get_sni(line: str) -> str:
+    try:
+        parsed = urlparse(line.strip())
+        q = parse_qs(parsed.query)
+        return (q.get('sni', [''])[0] or q.get('host', [''])[0]).lower()
+    except:
+        return ''
+
+def get_operators_label(sni: str) -> str:
+    for key, ops in SNI_OPERATORS.items():
+        if key in sni:
+            return ops
+    return 'Универсальный'
+
 def rename_key(line: str, label: str) -> str:
     line = line.strip()
-    if not line or line.startswith("#"):
+    if not line or line.startswith('#'):
         return line
     for proto in ["vless://", "vmess://", "trojan://", "ss://", "ssr://", "hysteria2://", "tuic://"]:
         if line.lower().startswith(proto):
@@ -117,19 +189,36 @@ def rename_key(line: str, label: str) -> str:
         parsed = urlparse(line)
         flag, country = get_flag_and_country(parsed.fragment)
         new_name = f"{flag} {country} - {label}"
-        return urlunparse((
-            parsed.scheme, parsed.netloc, parsed.path,
-            parsed.params, parsed.query, quote(new_name)
-        ))
-    except Exception:
+        return urlunparse((parsed.scheme, parsed.netloc, parsed.path,
+                           parsed.params, parsed.query, quote(new_name)))
+    except:
+        return line
+
+def rename_lte_key(line: str) -> str:
+    """Переименовывает LTE ключ С указанием операторов по SNI"""
+    line = line.strip()
+    if not line or line.startswith('#'):
+        return line
+    try:
+        parsed = urlparse(line)
+        flag, country = get_flag_and_country(parsed.fragment)
+        sni = get_sni(line)
+        ops = get_operators_label(sni)
+        new_name = f"{flag} {country} - LTE [{ops}]"
+        return urlunparse((parsed.scheme, parsed.netloc, parsed.path,
+                           parsed.params, parsed.query, quote(new_name)))
+    except:
         return line
 
 def rename_block(configs: list, label: str) -> list:
     return [rename_key(line, label) for line in configs]
 
 def is_cloudflare(config):
-    cf_patterns = ['cloudflare', 'cf-ip', '1.1.1.1', '104.', '172.67.', '141.193.']
-    return any(pattern in config.lower() for pattern in cf_patterns)
+    return any(p in config.lower() for p in ['cloudflare', 'cf-ip', '1.1.1.1', '104.', '172.67.', '141.193.'])
+
+def is_bad_key(config):
+    config_lower = config.lower()
+    return any(p in config_lower for p in BAD_PATTERNS)
 
 def is_bad_sni_cidr(config):
     config_lower = config.lower()
@@ -178,28 +267,18 @@ def save_to_github(content: str):
         'Authorization': f'token {GITHUB_TOKEN}',
         'Accept': 'application/vnd.github.v3+json'
     }
-
-    # Получаем SHA файла если он уже существует
     sha = None
     resp = requests.get(url, headers=headers)
     if resp.status_code == 200:
         sha = resp.json().get('sha')
-
-    # Кодируем контент в base64
     encoded = base64.b64encode(content.encode('utf-8')).decode('utf-8')
-
-    data = {
-        'message': '🔄 Обновление ключей SPECTER VPN',
-        'content': encoded,
-        'branch': GITHUB_BRANCH
-    }
+    data = {'message': '🔄 Обновление ключей SPECTER VPN', 'content': encoded, 'branch': GITHUB_BRANCH}
     if sha:
         data['sha'] = sha
-
     resp = requests.put(url, headers=headers, json=data)
     if resp.status_code in [200, 201]:
         print(f'\n✅ Файл сохранён в GitHub!')
-        print(f'🔗 RAW ссылка: https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}/{GITHUB_FILE}')
+        print(f'🔗 https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}/{GITHUB_FILE}')
     else:
         print(f'\n❌ Ошибка сохранения: {resp.status_code} — {resp.text}')
 
@@ -219,7 +298,7 @@ for source in PRIORITY_SOURCES:
     try:
         resp = requests.get(source, timeout=10)
         lines = [l.strip() for l in resp.text.splitlines()[3:] if l.strip()]
-        valid_lines = [l for l in lines if not is_cloudflare(l)]
+        valid_lines = [l for l in lines if not is_cloudflare(l) and not is_bad_key(l)]
         for country, target_count in target_blocks.items():
             if len(collected_blocks[country]) < target_count:
                 country_lines = [l for l in valid_lines if extract_country(l) == country]
@@ -245,7 +324,7 @@ for source in PRIORITY_SOURCES:
     try:
         resp = requests.get(source, timeout=10)
         lines = [l.strip() for l in resp.text.splitlines()[3:] if l.strip()]
-        valid_lines = [l for l in lines if not is_cloudflare(l)]
+        valid_lines = [l for l in lines if not is_cloudflare(l) and not is_bad_key(l)]
         for line in valid_lines:
             country = extract_country(line)
             if country not in used_countries and country != 'OTHER' and len(random_countries[country]) < 1:
@@ -256,12 +335,11 @@ for source in PRIORITY_SOURCES:
 random_countries_list = list(random_countries.keys())
 random.shuffle(random_countries_list)
 selected_random = random_countries_list[:16]
-
 for country in selected_random:
     random_countries[country] = rename_block(random_countries[country][:1], "WiFi")
 
-# ── 3. SNI/CIDR → LTE ────────────────────────────────────────────
-print("\n📥 SNI/CIDR:")
+# ── 3. SNI/CIDR → LTE (с определением оператора!) ────────────────
+print("\n📥 SNI/CIDR (умная сортировка по операторам):")
 sni_cidr_configs = []
 sni_cidr_ee = []
 
@@ -274,20 +352,33 @@ for source in SNI_CIDR_SOURCES:
             lines = lines[2:]
         filtered_lines = []
         for line in lines:
+            if is_cloudflare(line) or is_bad_key(line):
+                continue
             bad_result = is_bad_sni_cidr(line)
-            if not is_cloudflare(line):
-                if bad_result == 'EE_LAST':
-                    sni_cidr_ee.append(line)
-                elif not bad_result:
-                    filtered_lines.append(line)
+            if bad_result == 'EE_LAST':
+                sni_cidr_ee.append(line)
+            elif not bad_result:
+                filtered_lines.append(line)
         selected = filtered_lines[:10] if 'CIDR' in source_name else filtered_lines
         sni_cidr_configs.extend(selected)
         print(f"     ✅ {source_name}: +{len(selected)}")
     except Exception as e:
         print(f"     ❌ {e}")
 
-sni_cidr_configs = rename_block(sni_cidr_configs, "LTE")
-sni_cidr_ee      = rename_block(sni_cidr_ee,      "LTE")
+# Применяем умное переименование с операторами
+sni_cidr_renamed = [rename_lte_key(line) for line in sni_cidr_configs]
+sni_cidr_ee_renamed = [rename_lte_key(line) for line in sni_cidr_ee]
+
+# Статистика по операторам
+ops_stat = defaultdict(int)
+for line in sni_cidr_configs:
+    sni = get_sni(line)
+    ops = get_operators_label(sni)
+    ops_stat[ops] += 1
+
+print(f"\n📊 Статистика LTE по операторам:")
+for ops, count in sorted(ops_stat.items(), key=lambda x: -x[1])[:8]:
+    print(f"     {ops}: {count} ключей")
 
 # ── 4. ФИНАЛЬНАЯ СБОРКА ───────────────────────────────────────────
 final_configs = []
@@ -295,8 +386,8 @@ for country in ['DE', 'NL', 'FR', 'RU']:
     final_configs.extend(collected_blocks[country])
 for country in selected_random:
     final_configs.extend(random_countries[country][:1])
-final_configs.extend(sni_cidr_configs[:25])
-final_configs.extend(sni_cidr_ee[:3])
+final_configs.extend(sni_cidr_renamed[:25])
+final_configs.extend(sni_cidr_ee_renamed[:3])
 final_configs = final_configs[:60]
 
 content = HEADER + '\n' + '\n'.join(final_configs)
