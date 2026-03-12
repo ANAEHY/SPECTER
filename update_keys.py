@@ -409,7 +409,76 @@ for source in EXTRA_SOURCES:
 
 extra_renamed = [rename_lte_key(line) for line in extra_configs]
 
-# ── 5. ФИНАЛЬНАЯ СБОРКА ───────────────────────────────────────────
+# ── 5. РЕЗЕРВНЫЕ ИСТОЧНИКИ ───────────────────────────────────────
+RESERVE_SOURCES = [
+    # kort0881 — WiFi ключи (черные списки, обновляется каждые 15 мин)
+    {
+        'url': 'https://raw.githubusercontent.com/kort0881/vpn-vless-configs-russia/main/githubmirror/clean/vless.txt',
+        'label': 'WiFi',
+        'lte': False,
+        'count': 5,
+    },
+    # kort0881 — LTE ключи (только российские SNI белые списки)
+    {
+        'url': 'https://raw.githubusercontent.com/kort0881/vpn-vless-configs-russia/main/githubmirror/ru-sni/vless_ru.txt',
+        'label': 'LTE',
+        'lte': True,
+        'count': 5,
+    },
+    # AvenCores — WiFi ключи (обновляется каждые 9 мин)
+    {
+        'url': 'https://raw.githubusercontent.com/AvenCores/goida-vpn-configs/main/sub/vless.txt',
+        'label': 'WiFi',
+        'lte': False,
+        'count': 5,
+    },
+]
+
+print("\n📥 РЕЗЕРВНЫЕ ИСТОЧНИКИ:")
+reserve_configs = []
+
+for src in RESERVE_SOURCES:
+    source_name = src['url'].split('/')[-1]
+    try:
+        resp = requests.get(src['url'], timeout=12)
+        lines = [l.strip() for l in resp.text.splitlines()
+                 if l.strip() and not l.strip().startswith('#')]
+        good = []
+        for line in lines:
+            if not any(line.startswith(p) for p in ['vless://', 'vmess://', 'trojan://', 'ss://']):
+                continue
+            if is_cloudflare(line) or is_bad_key(line):
+                continue
+            if src['lte']:
+                sni = get_sni(line)
+                if not any(good_sni in sni for good_sni in EXTRA_GOOD_SNI):
+                    continue
+            good.append(line)
+
+        selected = random.sample(good, min(src['count'], len(good))) if good else []
+
+        renamed = []
+        for line in selected:
+            try:
+                parsed = urlparse(line)
+                flag, country = get_flag_and_country(parsed.fragment)
+                if src['lte']:
+                    sni = get_sni(line)
+                    ops = get_operators_label(sni)
+                    new_name = f"{flag} {country} - РЕЗЕРВ LTE [{ops}]"
+                else:
+                    new_name = f"{flag} {country} - РЕЗЕРВ WiFi"
+                renamed.append(urlunparse((parsed.scheme, parsed.netloc, parsed.path,
+                                           parsed.params, parsed.query, quote(new_name))))
+            except:
+                renamed.append(line)
+
+        reserve_configs.extend(renamed)
+        print(f"     ✅ {source_name}: найдено {len(good)}, берём {len(selected)}")
+    except Exception as e:
+        print(f"     ❌ {source_name}: {e}")
+
+# ── 6. ФИНАЛЬНАЯ СБОРКА ───────────────────────────────────────────
 final_configs = []
 for country in ['DE', 'NL', 'FR', 'RU']:
     final_configs.extend(collected_blocks[country])
@@ -418,10 +487,11 @@ for country in selected_random:
 final_configs.extend(sni_cidr_renamed[:25])
 final_configs.extend(sni_cidr_ee_renamed[:3])
 final_configs.extend(extra_renamed)
-final_configs = final_configs[:66]
+final_configs.extend(reserve_configs)
+final_configs = final_configs[:80]
 
 content = HEADER + '\n' + '\n'.join(final_configs)
 print(f"\n🎯 ИТОГО: {len(final_configs)} серверов")
 
-# ── 6. СОХРАНЯЕМ В GITHUB ────────────────────────────────────────
+# ── 7. СОХРАНЯЕМ В GITHUB ────────────────────────────────────────
 save_to_github(content)
