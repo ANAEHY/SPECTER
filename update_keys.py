@@ -226,6 +226,22 @@ def is_bad_sni_cidr(config):
     if any(p in config_lower for p in ['ee-', 'estonia', 'ee:', 'tallinn', '🇪🇪']): return 'EE_LAST'
     return False
 
+def is_server_alive(line, timeout=2.0):
+    import socket
+    try:
+        parsed = urlparse(line.strip())
+        host = parsed.hostname
+        port = parsed.port or 443
+        if not host:
+            return False
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        result = sock.connect_ex((host, port))
+        sock.close()
+        return result == 0
+    except:
+        return False
+
 def extract_country(config):
     patterns = {
         'DE': ['de-', 'germany', 'de:', 'berlin', 'frankfurt', 'de/', '🇩🇪'],
@@ -455,7 +471,15 @@ for src in RESERVE_SOURCES:
                     continue
             good.append(line)
 
-        selected = random.sample(good, min(src['count'], len(good))) if good else []
+        # Проверяем живость серверов (TCP connect)
+        alive = []
+        for line in good:
+            if is_server_alive(line):
+                alive.append(line)
+            if len(alive) >= src['count'] * 3:
+                break
+        pool = alive if alive else good
+        selected = random.sample(pool, min(src['count'], len(pool))) if pool else []
 
         renamed = []
         for line in selected:
@@ -474,7 +498,7 @@ for src in RESERVE_SOURCES:
                 renamed.append(line)
 
         reserve_configs.extend(renamed)
-        print(f"     ✅ {source_name}: найдено {len(good)}, берём {len(selected)}")
+        print(f"     ✅ {source_name}: найдено {len(good)}, живых {len(alive)}, берём {len(selected)}")
     except Exception as e:
         print(f"     ❌ {source_name}: {e}")
 
