@@ -331,15 +331,27 @@ for src in IGARECK_SOURCES:
 PRIORITY_COUNTRIES = ['DE', 'NL', 'FR', 'IT', 'ES', 'PL', 'GB']
 
 def get_key_country(key_str):
+    key_lower = key_str.lower()
     for code in PRIORITY_COUNTRIES:
-        if code.lower() in key_str.lower():
+        if code.lower() in key_lower:
             return code
     return 'ZZZ'
 
 def get_key_type(key_str):
     return 0 if 'WiFi' in key_str else 1
 
-all_keys.sort(key=lambda x: (get_key_type(x[0]), get_key_country(x[1])))
+def extract_country_from_name(key_str):
+    import re
+    match = re.search(r'([\U0001F1E0-\U0001F1FF])\s+(\w+)', key_str)
+    if match:
+        return match.group(2)
+    return 'ZZZ'
+
+all_keys.sort(key=lambda x: (
+    get_key_type(x[0]),
+    extract_country_from_name(x[0]),
+    get_key_country(x[1])
+))
 all_keys = [k[0] for k in all_keys]
 
 wifi = sum(1 for k in all_keys if 'WiFi' in k)
