@@ -336,7 +336,10 @@ def get_key_country(key_str):
             return code
     return 'ZZZ'
 
-all_keys.sort(key=lambda x: (get_key_country(x[1]), x[0]))
+def get_key_type(key_str):
+    return 0 if 'WiFi' in key_str else 1
+
+all_keys.sort(key=lambda x: (get_key_type(x[0]), get_key_country(x[1])))
 all_keys = [k[0] for k in all_keys]
 
 wifi = sum(1 for k in all_keys if 'WiFi' in k)
