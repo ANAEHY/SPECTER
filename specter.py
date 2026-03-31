@@ -7,7 +7,8 @@ import socket
 import subprocess
 import tempfile
 import platform
-from urllib.parse import urlparse, urlunparse, quote, parse_qs
+import re
+from urllib.parse import urlparse, urlunparse, quote, unquote, parse_qs
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # =====================
@@ -20,6 +21,28 @@ GITHUB_BRANCH = 'main'
 
 HEADER = """#profile-title: base64:8J+RuyBTUEFDVEVSIFZQTg==
 #profile-update-interval: 12"""
+
+# =====================
+# COUNTRY FLAGS
+# =====================
+COUNTRY_RU = {
+    "🇩🇪": "Германия", "🇫🇷": "Франция", "🇳🇱": "Нидерланды", "🇮🇹": "Италия",
+    "🇪🇸": "Испания", "🇵🇱": "Польша", "🇧🇪": "Бельгия", "🇦🇹": "Австрия",
+    "🇨🇭": "Швейцария", "🇸🇪": "Швеция", "🇳🇴": "Норвегия", "🇩🇰": "Дания",
+    "🇫🇮": "Финляндия", "🇬🇧": "Британия", "🇺🇸": "США", "🇨🇦": "Канада",
+    "🇦🇺": "Австралия", "🇯🇵": "Япония", "🇰🇷": "Корея", "🇸🇬": "Сингапур",
+    "🇷🇺": "Россия", "🇺🇦": "Украина", "🇹🇷": "Турция", "🇮🇱": "Израиль",
+    "🇦🇪": "ОАЭ", "🇮🇳": "Индия", "🇧🇷": "Бразилия", "🌐": "Anycast",
+}
+
+CODE_TO_FLAG = {
+    "DE": "🇩🇪", "FR": "🇫🇷", "NL": "🇳🇱", "IT": "🇮🇹", "ES": "🇪🇸",
+    "PL": "🇵🇱", "BE": "🇧🇪", "AT": "🇦🇹", "CH": "🇨🇭", "SE": "🇸🇪",
+    "NO": "🇳🇴", "DK": "🇩🇰", "FI": "🇫🇮", "GB": "🇬🇧", "US": "🇺🇸",
+    "CA": "🇨🇦", "AU": "🇦🇺", "JP": "🇯🇵", "KR": "🇰🇷", "SG": "🇸🇬",
+    "RU": "🇷🇺", "UA": "🇺🇦", "TR": "🇹🇷", "IL": "🇮🇱", "AE": "🇦🇪",
+    "IN": "🇮🇳", "BR": "🇧🇷",
+}
 
 # =====================
 # XRAY - REAL 204 PROVERKA
@@ -55,6 +78,48 @@ def install_xray():
         return True
     except:
         return False
+
+# =====================
+# COUNTRY DETECTION
+# =====================
+def get_flag_and_country(fragment: str):
+    decoded = unquote(fragment)
+    flag_match = re.search(r'([\U0001F1E0-\U0001F1FF]{2})', decoded)
+    if flag_match:
+        flag = flag_match.group(1)
+        if flag in COUNTRY_RU:
+            return flag, COUNTRY_RU[flag]
+    return "🌐", "Anycast"
+
+def extract_country(config):
+    patterns = {
+        'DE': ['de-', 'germany', 'de:', 'berlin', 'frankfurt', 'de/', '🇩🇪', 'germany', 'german'],
+        'FR': ['fr-', 'france', 'fr:', 'paris', 'fr/', '🇫🇷', 'france', 'french'],
+        'NL': ['nl-', 'netherlands', 'nl:', 'amsterdam', 'rotterdam', 'nl/', '🇳🇱', 'netherlands', 'dutch'],
+        'IT': ['it-', 'italy', 'it:', 'rome', 'milan', 'it/', '🇮🇹', 'italy', 'italian'],
+        'ES': ['es-', 'spain', 'es:', 'madrid', 'es/', '🇪🇸', 'spain', 'spanish'],
+        'PL': ['pl-', 'poland', 'pl:', 'warsaw', 'pl/', '🇵🇱', 'poland', 'polish'],
+        'GB': ['gb-', 'uk', 'gb:', 'london', 'uk/', '🇬🇧', 'britain', 'british', 'england'],
+        'US': ['us-', 'usa', 'us:', 'new york', 'nyc', 'la/', '🇺🇸', 'usa', 'america'],
+        'CA': ['ca-', 'canada', 'ca:', 'toronto', 'ca/', '🇨🇦', 'canada'],
+        'JP': ['jp-', 'japan', 'jp:', 'tokyo', 'jp/', '🇯🇵', 'japan', 'japanese'],
+        'RU': ['ru-', 'russia', 'ru:', 'moscow', 'spb', 'ru/', '🇷🇺', 'russia'],
+    }
+    config_lower = config.lower()
+    for country, pats in patterns.items():
+        if any(pat in config_lower for pat in pats):
+            return country
+    return 'OTHER'
+
+def get_country_from_url(uri):
+    p = urlparse(uri)
+    flag, country = get_flag_and_country(p.fragment)
+    if country != "Anycast":
+        return flag, country
+    country_code = extract_country(uri)
+    if country_code in CODE_TO_FLAG:
+        return CODE_TO_FLAG[country_code], COUNTRY_RU.get(CODE_TO_FLAG[country_code], "Anycast")
+    return "🌐", "Anycast"
 
 # =====================
 # PARSING
@@ -157,13 +222,6 @@ IGARECK_SOURCES = [
     {'url': 'https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/WHITE-SNI-RU-all.txt', 'lte': True, 'top_n': 8},
 ]
 
-def get_sni(uri):
-    try:
-        q = parse_qs(urlparse(uri).query)
-        return (q.get('sni', [''])[0] or q.get('host', [''])[0] or '').lower()
-    except:
-        return ''
-
 def load_keys(url):
     try:
         r = requests.get(url, timeout=15)
@@ -216,10 +274,12 @@ def check_all(keys):
     results.sort(key=lambda x: x[1])
     return results
 
-def rename_simple(uri, lte):
+def rename_with_country(uri, lte):
     p = urlparse(uri)
-    tag = "LTE" if lte else "WiFi"
-    return urlunparse((p.scheme, p.netloc, p.path, p.params, p.query, tag))
+    flag, country = get_country_from_url(uri)
+    tag = f"LTE" if lte else "WiFi"
+    new_name = f"{flag} {country} - {tag}"
+    return urlunparse((p.scheme, p.netloc, p.path, p.params, p.query, quote(new_name)))
 
 def save_github(content):
     url = f'https://api.github.com/repos/{GITHUB_REPO}/contents/{GITHUB_FILE}'
@@ -266,7 +326,7 @@ for src in IGARECK_SOURCES:
         print(f"   top: {', '.join(f'{ms}ms' for _, ms in top)}")
     
     for uri, _ in top:
-        all_keys.append(rename_simple(uri, src['lte']))
+        all_keys.append(rename_with_country(uri, src['lte']))
 
 wifi = sum(1 for k in all_keys if 'WiFi' in k)
 lte = sum(1 for k in all_keys if 'LTE' in k)
