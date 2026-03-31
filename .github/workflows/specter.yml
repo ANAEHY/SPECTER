@@ -16,6 +16,8 @@ jobs:
           curl -L -o xray.zip https://github.com/XTLS/Xray-core/releases/download/v1.8.6/Xray-windows-64.zip
           powershell -Command "Expand-Archive -Force xray.zip ."
           del xray.zip
+      - name: Install dependencies
+        run: pip install requests
       - name: Run
         run: python specter.py
       - name: Save
