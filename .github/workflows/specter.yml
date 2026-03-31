@@ -25,3 +25,4 @@ jobs:
           git add keys.txt
           git diff --staged --quiet || git commit -m "Auto update"
           git push
+Key fix: Xray-linux-64.zip → Xray-windows-64.zip and Windows commands.
