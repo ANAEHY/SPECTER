@@ -1,3 +1,8 @@
+import sys
+import io
+if sys.platform == 'win32':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+
 import requests
 import os
 import json
@@ -388,7 +393,7 @@ def save_github(content):
     if r.status_code in (200, 201):
         print('\n[OK] Saved to GitHub')
     else:
-        print(f'\n[ERROR] {r.status_code}')
+        print(f'\n[ERROR] {r.status_code}: {r.text[:100]}')
 
 # =====================
 # MAIN
