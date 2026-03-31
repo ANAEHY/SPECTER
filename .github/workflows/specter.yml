@@ -22,10 +22,3 @@ jobs:
         run: python specter.py
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
-      - name: Save
-        run: |
-          git config user.email "specter@local"
-          git config user.name "SPECTER"
-          git add keys.txt
-          git diff --staged --quiet || git commit -m "Auto update"
-          git push
