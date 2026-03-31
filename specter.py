@@ -326,7 +326,18 @@ for src in IGARECK_SOURCES:
         print(f"   top: {', '.join(f'{ms}ms' for _, ms in top)}")
     
     for uri, _ in top:
-        all_keys.append(rename_with_country(uri, src['lte']))
+        all_keys.append((rename_with_country(uri, src['lte']), uri))
+
+PRIORITY_COUNTRIES = ['DE', 'NL', 'FR', 'IT', 'ES', 'PL', 'GB']
+
+def get_key_country(key_str):
+    for code in PRIORITY_COUNTRIES:
+        if code.lower() in key_str.lower():
+            return code
+    return 'ZZZ'
+
+all_keys.sort(key=lambda x: (get_key_country(x[1]), x[0]))
+all_keys = [k[0] for k in all_keys]
 
 wifi = sum(1 for k in all_keys if 'WiFi' in k)
 lte = sum(1 for k in all_keys if 'LTE' in k)
