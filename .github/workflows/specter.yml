@@ -21,7 +21,7 @@ jobs:
       - name: Run
         run: python specter.py
         env:
-          MY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
       - name: Save
         run: |
           git config user.email "specter@local"
