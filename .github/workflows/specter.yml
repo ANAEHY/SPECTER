@@ -10,14 +10,18 @@ jobs:
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
+      
       - name: Install xray
         run: |
-          curl -L -o xray.zip https://github.com/XTLS/Xray-core/releases/download/v1.8.6/Xray-linux-64.zip
-          unzip xray.zip xray && chmod +x xray
+          curl -L -o xray.zip https://github.com/XTLS/Xray-core/releases/download/v1.8.6/Xray-windows-64.zip
+          powershell -Command "Expand-Archive -Force xray.zip ."
+          del xray.zip
       - name: Run
-        run: python3 specter.py
+        run: python specter.py
       - name: Save
         run: |
           git config user.email "specter@local"
-          git add keys.txt && git commit -m "update" || true
+          git config user.name "SPECTER"
+          git add keys.txt
+          git diff --staged --quiet || git commit -m "Auto update"
           git push
