@@ -13,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 # =====================
 # GITHUB - github.token avtomaticheski
 # =====================
-GITHUB_TOKEN = os.getenv('GITHUB_TOKEN')
+GITHUB_TOKEN = os.getenv('GH_TOKEN')
 GITHUB_REPO = 'ANAEHY/SPECTER'
 GITHUB_FILE = 'keys.txt'
 GITHUB_BRANCH = 'main'
