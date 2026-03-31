@@ -411,7 +411,6 @@ total = 0
 for src in IGARECK_SOURCES:
     print(f"\n[{src['url'].split('/')[-1]}]")
     keys = dedup(load_keys(src['url']))
-    keys = [k for k in keys if not is_cloudflare(k) and not is_bad_key(k)]
     print(f"   loaded: {len(keys)}")
     total += len(keys)
     if not keys:
