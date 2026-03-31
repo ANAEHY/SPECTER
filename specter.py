@@ -117,8 +117,23 @@ def get_country_from_url(uri):
     if country != "Anycast":
         return flag, country
     country_code = extract_country(uri)
-    if country_code in CODE_TO_FLAG:
-        return CODE_TO_FLAG[country_code], COUNTRY_RU.get(CODE_TO_FLAG[country_code], "Anycast")
+    country_map = {
+        'DE': ('🇩🇪', 'Германия'),
+        'NL': ('🇳🇱', 'Нидерланды'),
+        'FR': ('🇫🇷', 'Франция'),
+        'IT': ('🇮🇹', 'Италия'),
+        'ES': ('🇪🇸', 'Испания'),
+        'PL': ('🇵🇱', 'Польша'),
+        'GB': ('🇬🇧', 'Британия'),
+        'US': ('🇺🇸', 'США'),
+        'CA': ('🇨🇦', 'Канада'),
+        'AU': ('🇦🇺', 'Австралия'),
+        'JP': ('🇯🇵', 'Япония'),
+        'KR': ('🇰🇷', 'Корея'),
+        'RU': ('🇷🇺', 'Россия'),
+    }
+    if country_code in country_map:
+        return country_map[country_code]
     return "🌐", "Anycast"
 
 # =====================
@@ -329,7 +344,11 @@ for src in IGARECK_SOURCES:
         all_keys.append((rename_with_country(uri, src['lte']), uri))
 
 PRIORITY_COUNTRIES = ['DE', 'NL', 'FR', 'IT', 'ES', 'PL', 'GB']
-COUNTRY_ORDER = ['Германия', 'Нидерланды', 'Франция', 'Италия', 'Испания', 'Польша', 'Британия', 'США', 'Канада', 'Австралия', 'Япония', 'Корея', 'Россия', 'Anycast']
+COUNTRY_ORDER = {
+    'Германия': 1, 'Нидерланды': 2, 'Франция': 3, 'Италия': 4, 'Испания': 5, 
+    'Польша': 6, 'Британия': 7, 'США': 8, 'Канада': 9, 'Австралия': 10, 
+    'Япония': 11, 'Корея': 12, 'Россия': 13, 'Anycast': 999
+}
 
 def get_key_type(key_str):
     return 0 if 'WiFi' in key_str else 1
@@ -339,12 +358,12 @@ def extract_country_order(key_str):
         from urllib.parse import unquote
         p = urlparse(key_str)
         fragment = unquote(p.fragment) if p.fragment else ''
-        for country in COUNTRY_ORDER:
+        for country, order in COUNTRY_ORDER.items():
             if country.lower() in fragment.lower():
-                return COUNTRY_ORDER.index(country)
-        return 999
+                return order
+        return 998
     except:
-        return 999
+        return 998
 
 all_keys.sort(key=lambda x: (
     get_key_type(x[0]),
