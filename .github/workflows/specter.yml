@@ -1,0 +1,23 @@
+name: SPECTER
+on:
+  schedule:
+    - cron: '0 */3 * * *'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  specter:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install xray
+        run: |
+          curl -L -o xray.zip https://github.com/XTLS/Xray-core/releases/download/v1.8.6/Xray-linux-64.zip
+          unzip xray.zip xray && chmod +x xray
+      - name: Run
+        run: python3 specter.py
+      - name: Save
+        run: |
+          git config user.email "specter@local"
+          git add keys.txt && git commit -m "update" || true
+          git push
