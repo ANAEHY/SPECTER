@@ -329,28 +329,26 @@ for src in IGARECK_SOURCES:
         all_keys.append((rename_with_country(uri, src['lte']), uri))
 
 PRIORITY_COUNTRIES = ['DE', 'NL', 'FR', 'IT', 'ES', 'PL', 'GB']
-
-def get_key_country(key_str):
-    key_lower = key_str.lower()
-    for code in PRIORITY_COUNTRIES:
-        if code.lower() in key_lower:
-            return code
-    return 'ZZZ'
+COUNTRY_ORDER = ['Германия', 'Нидерланды', 'Франция', 'Италия', 'Испания', 'Польша', 'Британия', 'США', 'Канада', 'Австралия', 'Япония', 'Корея', 'Россия', 'Anycast']
 
 def get_key_type(key_str):
     return 0 if 'WiFi' in key_str else 1
 
-def extract_country_from_name(key_str):
-    import re
-    match = re.search(r'([\U0001F1E0-\U0001F1FF])\s+(\w+)', key_str)
-    if match:
-        return match.group(2)
-    return 'ZZZ'
+def extract_country_order(key_str):
+    try:
+        from urllib.parse import unquote
+        p = urlparse(key_str)
+        fragment = unquote(p.fragment) if p.fragment else ''
+        for country in COUNTRY_ORDER:
+            if country.lower() in fragment.lower():
+                return COUNTRY_ORDER.index(country)
+        return 999
+    except:
+        return 999
 
 all_keys.sort(key=lambda x: (
     get_key_type(x[0]),
-    extract_country_from_name(x[0]),
-    get_key_country(x[1])
+    extract_country_order(x[0])
 ))
 all_keys = [k[0] for k in all_keys]
 
