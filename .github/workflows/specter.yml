@@ -20,6 +20,8 @@ jobs:
         run: pip install requests
       - name: Run
         run: python specter.py
+        env:
+          MY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Save
         run: |
           git config user.email "specter@local"
