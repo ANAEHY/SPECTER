@@ -150,55 +150,22 @@ def make_xray_config(outbound, proxy_port=10808):
         'outbounds': [outbound, {'protocol': 'freedom', 'tag': 'direct'}],
     }
 
-def check_xray_204(uri, proxy_port=10808, timeout=10.0):
-    if 'vless://' in uri:
-        outbound = parse_vless_outbound(uri)
-    elif 'trojan://' in uri:
-        outbound = parse_trojan_outbound(uri)
-    else:
-        return 9999.0
-
-    if not outbound:
-        return 9999.0
-
-    cfg = make_xray_config(outbound, proxy_port)
-    tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
+def check_tls(uri, timeout=5.0):
+    """Быстрая проверка: отвечает ли сервер на TLS handshake"""
     try:
-        json.dump(cfg, tmp)
-        tmp.close()
-
-        proc = subprocess.Popen(
-            [XRAY_PATH, '-config', tmp.name],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        )
-        time.sleep(2.0)
-
+        p = urlparse(uri)
+        host = p.hostname
+        port = p.port or 443
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
         t0 = time.time()
-        try:
-            r = requests.get(
-                f'http://127.0.0.1:{proxy_port}/generate_204',
-                proxies={'http': f'socks5://127.0.0.1:{proxy_port}'},
-                timeout=timeout,
-                allow_redirects=False,
-            )
-            ms = round((time.time() - t0) * 1000, 1)
-            if r.status_code == 204:
+        with socket.create_connection((host, port), timeout=timeout) as sock:
+            with ctx.wrap_socket(sock, server_hostname=host) as ssock:
+                ms = round((time.time() - t0) * 1000, 1)
                 return ms
-        except:
-            pass
-        finally:
-            proc.terminate()
-            try:
-                proc.wait(timeout=3)
-            except:
-                proc.kill()
-    finally:
-        try:
-            os.unlink(tmp.name)
-        except:
-            pass
-
-    return 9999.0
+    except:
+        return 9999.0
 
 def load_keys(url):
     try:
@@ -327,9 +294,8 @@ to_check.extend(by_type['trojan'][:MAX_PER_TYPE])
 results = []
 
 def worker(uri, idx):
-    port = 10808 + idx  # Каждый поток на своём порту
     if xray_ok:
-        ms = check_xray_204(uri, proxy_port=port, timeout=10.0)
+        ms = check_tls(uri, timeout=5.0)
     else:
         ms = 9999.0
     return uri, ms
