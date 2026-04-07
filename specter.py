@@ -18,6 +18,10 @@ import re
 from urllib.parse import urlparse, urlunparse, quote, unquote, parse_qs
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+import sys
+sys.stdout.reconfigure(encoding='utf-8')
+sys.stderr.reconfigure(encoding='utf-8')
+
 # ══════════════════════════════════════════════════════════════════
 #  GITHUB
 # ══════════════════════════════════════════════════════════════════
