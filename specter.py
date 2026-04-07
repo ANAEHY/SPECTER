@@ -156,12 +156,14 @@ def check_tls(uri, timeout=5.0):
         p = urlparse(uri)
         host = p.hostname
         port = p.port or 443
+        q = parse_qs(p.query)
+        sni = q.get('sni', [host])[0]
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
         t0 = time.time()
         with socket.create_connection((host, port), timeout=timeout) as sock:
-            with ctx.wrap_socket(sock, server_hostname=host) as ssock:
+            with ctx.wrap_socket(sock, server_hostname=sni) as ssock:
                 ms = round((time.time() - t0) * 1000, 1)
                 return ms
     except:
@@ -282,41 +284,23 @@ print(f"   VLESS gRPC REALITY: {len(by_type['grpc'])}")
 print(f"   Trojan TLS:         {len(by_type['trojan'])}")
 print(f"   Other:              {len(by_type['other'])}")
 
-# ── ПРОВЕРКА XRAY ──
-print(f"\n🚀 Проверка xray + 204 (max_workers=4)...\n")
+# ── ОТБОР: берём по 5 каждого типа ──
+print(f"\n📋 Отбираем ключи по типам...")
 
-MAX_PER_TYPE = 20
-to_check = []
-to_check.extend(by_type['tcp'][:MAX_PER_TYPE])
-to_check.extend(by_type['grpc'][:MAX_PER_TYPE])
-to_check.extend(by_type['trojan'][:MAX_PER_TYPE])
-
+PER_TYPE = 5
 results = []
+results.extend(by_type['tcp'][:PER_TYPE])
+results.extend(by_type['grpc'][:PER_TYPE])
+results.extend(by_type['trojan'][:PER_TYPE])
 
-def worker(uri, idx):
-    if xray_ok:
-        ms = check_tls(uri, timeout=5.0)
-    else:
-        ms = 9999.0
-    return uri, ms
-
-with ThreadPoolExecutor(max_workers=4) as ex:
-    futures = {ex.submit(worker, uri, i): uri for i, uri in enumerate(to_check)}
-    done, alive = 0, 0
-    for future in as_completed(futures):
-        uri, ms = future.result()
-        done += 1
-        if ms < 9999.0:
-            alive += 1
-            results.append((uri, ms))
-        if done % 10 == 0 or done == len(to_check):
-            print(f"      [{done}/{len(to_check)}] живых: {alive}", flush=True)
-
-print(f"\n✅ Живых: {len(results)}/{len(to_check)}")
+print(f"   TCP REALITY:  {len(by_type['tcp'][:PER_TYPE])}")
+print(f"   gRPC REALITY: {len(by_type['grpc'][:PER_TYPE])}")
+print(f"   Trojan TLS:   {len(by_type['trojan'][:PER_TYPE])}")
+print(f"   ИТОГО: {len(results)}")
 
 # ── ФИНАЛЬНАЯ СБОРКА ──
 final = []
-for uri, ms in results:
+for uri in results:
     t = get_key_type(uri)
     if t == 'tcp':
         final.append(rename_key(uri, 'TCP·REALITY'))
