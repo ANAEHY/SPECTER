@@ -140,17 +140,17 @@ def parse_trojan_outbound(uri):
     except:
         return None
 
-def make_xray_config(outbound):
+def make_xray_config(outbound, proxy_port=10808):
     return {
         'log': {'loglevel': 'warning'},
         'inbounds': [{
-            'port': 10808, 'listen': '127.0.0.1', 'protocol': 'socks',
+            'port': proxy_port, 'listen': '127.0.0.1', 'protocol': 'socks',
             'settings': {'auth': 'noauth', 'udp': False},
         }],
         'outbounds': [outbound, {'protocol': 'freedom', 'tag': 'direct'}],
     }
 
-def check_xray_204(uri, timeout=10.0):
+def check_xray_204(uri, proxy_port=10808, timeout=10.0):
     if 'vless://' in uri:
         outbound = parse_vless_outbound(uri)
     elif 'trojan://' in uri:
@@ -161,7 +161,7 @@ def check_xray_204(uri, timeout=10.0):
     if not outbound:
         return 9999.0
 
-    cfg = make_xray_config(outbound)
+    cfg = make_xray_config(outbound, proxy_port)
     tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
     try:
         json.dump(cfg, tmp)
@@ -176,8 +176,8 @@ def check_xray_204(uri, timeout=10.0):
         t0 = time.time()
         try:
             r = requests.get(
-                'http://127.0.0.1:10808/generate_204',
-                proxies={'http': 'socks5://127.0.0.1:10808'},
+                f'http://127.0.0.1:{proxy_port}/generate_204',
+                proxies={'http': f'socks5://127.0.0.1:{proxy_port}'},
                 timeout=timeout,
                 allow_redirects=False,
             )
@@ -326,15 +326,16 @@ to_check.extend(by_type['trojan'][:MAX_PER_TYPE])
 
 results = []
 
-def worker(uri):
+def worker(uri, idx):
+    port = 10808 + idx  # Каждый поток на своём порту
     if xray_ok:
-        ms = check_xray_204(uri, timeout=10.0)
+        ms = check_xray_204(uri, proxy_port=port, timeout=10.0)
     else:
         ms = 9999.0
     return uri, ms
 
 with ThreadPoolExecutor(max_workers=4) as ex:
-    futures = {ex.submit(worker, uri): uri for uri in to_check}
+    futures = {ex.submit(worker, uri, i): uri for i, uri in enumerate(to_check)}
     done, alive = 0, 0
     for future in as_completed(futures):
         uri, ms = future.result()
