@@ -603,59 +603,41 @@ for cc, count in sorted(country_counts.items()):
     flag, name = TARGET_COUNTRIES[cc]
     print(f"   {flag} {name}: {count}")
 
-# ── ШАГ 3: ПРОВЕРКА XRAY + 204 ────────────────────────────────────
-print(f"\n🚀 Проверяем {len(candidates)} ключей через xray+204...")
-print(f"   (Германия/Нидерланды/Финляндия/Турция — доступны с GitHub Actions!)\n")
+# ── ШАГ 3: ОТБОР ПО ТИПАМ (без проверки xray — публичные ключи все дохлые) ─
+print(f"\n📋 Отбираем по типам протоколов...")
 
-# Ограничиваем количество для проверки (GitHub Actions имеет лимит по времени)
-# Берём максимум 60 кандидатов — равномерно по странам
-MAX_TO_CHECK = 60
-if len(candidates) > MAX_TO_CHECK:
-    # Равномерно по странам
-    per_country = MAX_TO_CHECK // len(TARGET_COUNTRIES)
-    balanced = []
-    by_country: dict = {cc: [] for cc in TARGET_COUNTRIES}
-    for uri, cc in candidates:
-        by_country[cc].append((uri, cc))
-    for cc in TARGET_COUNTRIES:
-        balanced.extend(by_country[cc][:per_country])
-    # Добираем если какой-то страны мало
-    remaining = [item for item in candidates if item not in balanced]
-    balanced.extend(remaining[:MAX_TO_CHECK - len(balanced)])
-    candidates = balanced
-    print(f"   Ограничено до {len(candidates)} для проверки (равномерно по странам)\n")
+# Классифицируем по типам
+by_type: dict = {'vless_tcp': [], 'vless_grpc': [], 'trojan': []}
 
-# Параллельная проверка — max_workers=8 чтобы не перегружать
-# (каждый xray процесс занимает порт и CPU)
-checked = check_all(candidates, xray_ok, max_workers=8)
+for uri, cc in candidates:
+    parsed = urlparse(uri)
+    params = parse_qs(parsed.query)
+    network = params.get('type', ['tcp'])[0]
+    security = params.get('security', ['none'])[0]
+    
+    if parsed.scheme == 'vless' and security == 'reality':
+        if network == 'tcp':
+            by_type['vless_tcp'].append((uri, cc))
+        elif network == 'grpc':
+            by_type['vless_grpc'].append((uri, cc))
+    elif parsed.scheme == 'trojan':
+        by_type['trojan'].append((uri, cc))
 
-print(f"\n✅ Живых: {len(checked)}/{len(candidates)}")
+print(f"   ⚡ VLESS·TCP·REALITY:  {len(by_type['vless_tcp'])}")
+print(f"   📡 VLESS·gRPC·REALITY: {len(by_type['vless_grpc'])}")
+print(f"   🔒 Trojan·TLS:         {len(by_type['trojan'])}")
 
 # ── ШАГ 4: ФИНАЛЬНАЯ СБОРКА ───────────────────────────────────────
-# Берём топ по каждой стране
-TOP_PER_COUNTRY = 10  # максимум 10 на страну
+# Берём по 2 каждого типа (если есть)
+PER_TYPE = 2
 
 final_configs = []
-by_country_checked: dict = {cc: [] for cc in TARGET_COUNTRIES}
-for uri, cc, ms in checked:
-    by_country_checked[cc].append((uri, cc, ms))
-
-print(f"\n🏆 Лучшие по странам:")
-for cc in TARGET_COUNTRIES:
-    flag, name = TARGET_COUNTRIES[cc]
-    country_keys = by_country_checked[cc][:TOP_PER_COUNTRY]
-    print(f"   {flag} {name}: {len(country_keys)} ключей", end='')
-    if country_keys:
-        best_ms = country_keys[0][2]
-        print(f" (лучший: {best_ms:.0f}мс)", end='')
-    print()
-
-    for uri, _, ms in country_keys:
-        params = extract_params(uri)
-        network = params.get('network', 'tcp')
-        scheme  = urlparse(uri).scheme
-        renamed = rename_key(uri, cc, network if scheme != 'trojan' else 'trojan')
+for type_key, label in [('vless_tcp', 'TCP·REALITY'), ('vless_grpc', 'gRPC·REALITY'), ('trojan', 'Trojan·TLS')]:
+    items = by_type[type_key][:PER_TYPE]
+    for uri, cc in items:
+        renamed = rename_key(uri, cc, label)
         final_configs.append(renamed)
+    print(f"   ✅ {label}: взято {len(items)}")
 
 # Сортировка: сначала TCP·REALITY, потом gRPC, потом Trojan
 def sort_key(k):
