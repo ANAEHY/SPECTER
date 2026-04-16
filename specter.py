@@ -1,3 +1,6 @@
+import sys
+sys.stdout.reconfigure(encoding='utf-8')
+
 import requests
 import os
 import json
@@ -229,12 +232,13 @@ def check_tcp(host, port, timeout=2.0):
 # SOURCES
 # =====================
 IGARECK_SOURCES = [
-    {'url': 'https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/BLACK_VLESS_RUS_mobile.txt', 'lte': False, 'top_n': 8},
-    {'url': 'https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/BLACK_VLESS_RUS.txt', 'lte': False, 'top_n': 8},
-    {'url': 'https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/Vless-Reality-White-Lists-Rus-Mobile.txt', 'lte': True, 'top_n': 8},
-    {'url': 'https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/Vless-Reality-White-Lists-Rus-Mobile-2.txt', 'lte': True, 'top_n': 8},
-    {'url': 'https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/WHITE-CIDR-RU-checked.txt', 'lte': True, 'top_n': 8},
-    {'url': 'https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/WHITE-SNI-RU-all.txt', 'lte': True, 'top_n': 8},
+    {'url': 'https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/BLACK_VLESS_RUS_mobile.txt', 'lte': False, 'top_n': 8, 'skip_check': False},
+    {'url': 'https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/BLACK_VLESS_RUS.txt', 'lte': False, 'top_n': 8, 'skip_check': False},
+    {'url': 'https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/Vless-Reality-White-Lists-Rus-Mobile.txt', 'lte': True, 'top_n': 8, 'skip_check': False},
+    {'url': 'https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/Vless-Reality-White-Lists-Rus-Mobile-2.txt', 'lte': True, 'top_n': 8, 'skip_check': False},
+    {'url': 'https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/WHITE-CIDR-RU-checked.txt', 'lte': True, 'top_n': 8, 'skip_check': False},
+    # SNI - без проверки, берём все и переименовываем
+    {'url': 'https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/WHITE-SNI-RU-all.txt', 'lte': True, 'top_n': None, 'skip_check': True},
 ]
 
 def load_keys(url):
@@ -296,6 +300,12 @@ def rename_with_country(uri, lte):
     new_name = f"{flag} {country} - {tag}"
     return urlunparse((p.scheme, p.netloc, p.path, p.params, p.query, quote(new_name)))
 
+def rename_sni(uri):
+    """Переименовываем SNI-ключи без проверки"""
+    p = urlparse(uri)
+    new_name = "Сервер Универсальный SNI"
+    return urlunparse((p.scheme, p.netloc, p.path, p.params, p.query, quote(new_name)))
+
 def save_github(content):
     url = f'https://api.github.com/repos/{GITHUB_REPO}/contents/{GITHUB_FILE}'
     headers = {'Authorization': f'token {GITHUB_TOKEN}', 'Accept': 'application/vnd.github.v3+json'}
@@ -332,11 +342,20 @@ for src in IGARECK_SOURCES:
     total += len(keys)
     if not keys:
         continue
-    
+
+    # ── SNI: без проверки, берём все, переименовываем ──
+    if src.get('skip_check'):
+        print(f"   skip_check: добавляем все {len(keys)} ключей без проверки")
+        for uri in keys:
+            all_keys.append((rename_sni(uri), uri))
+        continue
+
+    # ── Остальные источники: проверка по 204 ──
     checked = check_all(keys)
     print(f"   alive: {len(checked)}/{len(keys)}")
     
-    top = checked[:src['top_n']]
+    top_n = src['top_n']
+    top = checked[:top_n] if top_n else checked
     if top:
         print(f"   top: {', '.join(f'{ms}ms' for _, ms in top)}")
     
@@ -365,6 +384,8 @@ def extract_country_order(key_str):
     except:
         return 998
 
+# SNI-ключи идут в конец (у них нет WiFi/LTE в названии → get_key_type вернёт 1,
+# extract_country_order вернёт 998 → они сгруппируются после обычных ключей)
 all_keys.sort(key=lambda x: (
     get_key_type(x[0]),
     extract_country_order(x[0])
@@ -373,8 +394,9 @@ all_keys = [k[0] for k in all_keys]
 
 wifi = sum(1 for k in all_keys if 'WiFi' in k)
 lte = sum(1 for k in all_keys if 'LTE' in k)
+sni = sum(1 for k in all_keys if 'SNI' in k)
 
-print(f"\nTOTAL: {len(all_keys)} ({wifi} WiFi, {lte} LTE)")
+print(f"\nTOTAL: {len(all_keys)} ({wifi} WiFi, {lte} LTE, {sni} SNI)")
 
 content = HEADER + '\n' + '\n'.join(all_keys)
 save_github(content)
