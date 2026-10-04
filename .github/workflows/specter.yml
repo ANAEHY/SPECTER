@@ -1,25 +1,32 @@
-
 name: SPECTER
+
 on:
   schedule:
     - cron: '0 */3 * * *'
   workflow_dispatch:
+
 permissions:
   contents: write
+
+concurrency:
+  group: specter
+  cancel-in-progress: false
+
 jobs:
   specter:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest        # быстрее и дешевле windows-latest; xray скрипт качает сам
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Install xray
-        run: |
-          curl -L -o xray.zip https://github.com/XTLS/Xray-core/releases/download/v1.8.6/Xray-windows-64.zip
-          powershell -Command "Expand-Archive -Force xray.zip ."
-          del xray.zip
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
       - name: Install dependencies
-        run: pip install requests
+        run: pip install -q requests
+
       - name: Run
         run: python specter.py
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          PYTHONUNBUFFERED: '1'
