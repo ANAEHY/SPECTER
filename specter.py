@@ -13,7 +13,6 @@ import platform
 import re
 from urllib.parse import urlparse, urlunparse, quote, unquote, parse_qs
 from concurrent.futures import ThreadPoolExecutor, as_completed
-
 # =====================
 # GITHUB
 # =====================
