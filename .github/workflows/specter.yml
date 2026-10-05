@@ -1,17 +1,13 @@
 name: SPECTER
-
 on:
   schedule:
     - cron: '0 */3 * * *'
   workflow_dispatch:
-
 permissions:
   contents: write
-
 concurrency:
   group: specter
   cancel-in-progress: false
-
 jobs:
   specter:
     runs-on: ubuntu-latest        # быстрее и дешевле windows-latest; xray скрипт качает сам
@@ -21,10 +17,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-
       - name: Install dependencies
         run: pip install -q requests
-
+      # память между запусками: аптайм ключей → мигающие отсекаем, долгожители 💎
+      - name: Restore state
+        uses: actions/cache@v4
+        with:
+          path: state.json
+          key: specter-state-${{ github.run_id }}
+          restore-keys: specter-state-
       - name: Run
         run: python specter.py
         env:
