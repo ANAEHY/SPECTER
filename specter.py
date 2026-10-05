@@ -7,19 +7,22 @@
   2. alive    НАСТОЯЩАЯ проверка: поднимаем xray и ходим в интернет через каждый ключ
               (нужно ≥2 успешных проб из 3). Один процесс xray на ~100 ключей → летает.
   3. enrich   для живых: страна выхода + замер скорости загрузки (Мбит/с)
-  4. publish  сортировка по скорости, имена «🇩🇪 Германия - LTE - 🚀 245 Мбит/с», пуш keys.txt
+  4. memory   state.json: аптайм каждого ключа между запусками → мигающие отсекаем, долгожители 💎
+  5. publish  сортировка по скорости, имена «🇩🇪 💎 245 Мбит/с · LTE · Германия», пуш keys.txt
 
 Локально без токена: результат пишется в keys.local.txt (в GitHub ничего не уходит).
 """
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 import platform
 import re
 import shutil
 import socket
+import statistics
 import subprocess
 import sys
 import tempfile
@@ -68,7 +71,7 @@ SOURCES = [
 ]
 
 # подпись в имени ключа и порядок групп в выдаче (SNI → WiFi → LTE)
-TAGS = {'sni': ('Универсальный SNI', 0), 'wifi': ('WiFi', 1), 'lte': ('LTE', 2)}
+TAGS = {'sni': ('SNI', 0), 'wifi': ('WiFi', 1), 'lte': ('LTE', 2)}
 GROUP_BY_TYPE = True              # True: сортировка по скорости внутри групп; False: одна общая по скорости
 
 # ── проверка «живой / мёртвый» ──
@@ -103,6 +106,17 @@ EXIT_GEO_URLS = [                 # узнаём страну ВЫХОДА (че
 ]
 
 MIN_KEYS_TO_PUBLISH = 5           # если живых меньше — не затираем keys.txt
+
+# ── память между запусками (долговечность) ──
+STATE_FILE = Path(os.getenv('SPECTER_STATE', 'state.json'))
+HISTORY_LEN = 24                  # сколько последних проверок помним (24 ≈ 3 суток при cron раз в 3 ч)
+SPEED_SAMPLES = 5                 # показываем медиану последних N замеров — список не «дёргается»
+FLAP_MIN_CHECKS = 4               # с какого числа проверок судим о стабильности
+MIN_UPTIME = 0.6                  # аптайм ниже → «мигающий» ключ, в выдачу не берём
+PROVEN_MIN_CHECKS = 16            # 💎 = минимум столько проверок (≈2 суток) ...
+PROVEN_MIN_UPTIME = 0.9           # ... и такой аптайм
+TRUST = {'proven': 1.0, 'known': 0.9, 'new': 0.75}   # при отборе в top новичкам — скидка на скорость
+PRUNE_DAYS = 14                   # забываем ключи, которые пропали из источников
 
 UA = 'Mozilla/5.0 (SPECTER checker)'
 XRAY_DIR = Path(tempfile.gettempdir()) / 'specter-xray'
@@ -168,15 +182,23 @@ def flag_to_cc(text: str) -> str:
     return ''.join(chr(ord(c) - 0x1F1E6 + 65) for c in m.group()) if m else ''
 
 
+def round_speed(v: float) -> float:
+    """Грубое округление: список не «дёргается» от каждого замера → меньше лишних коммитов."""
+    if v >= 100:
+        return float(round(v / 10) * 10)
+    if v >= 20:
+        return float(round(v / 5) * 5)
+    return float(round(v)) if v >= 10 else round(v, 1)
+
+
+def speed_icon(mbps: float) -> str:
+    return '🚀' if mbps >= 100 else '⚡' if mbps >= 30 else '🐢'
+
+
 def fmt_speed(mbps: float) -> str:
-    icon = '🚀' if mbps >= 100 else '⚡' if mbps >= 30 else '🐢'
     if mbps >= 1000:
-        text = f'{mbps / 1000:.1f} Гбит/с'
-    elif mbps >= 10:
-        text = f'{mbps:.0f} Мбит/с'
-    else:
-        text = f'{mbps:.1f} Мбит/с'
-    return f'{icon} {text}'
+        return f'{mbps / 1000:.1f} Гбит/с'
+    return f'{mbps:.0f} Мбит/с' if mbps >= 10 else f'{mbps:.1f} Мбит/с'
 
 
 # ═══════════════════════════════ XRAY ═══════════════════════════════
@@ -254,8 +276,10 @@ class Node:
     outbound: dict
     remark_cc: str = ''            # страна из исходного названия (запасной вариант)
     latency: float | None = None   # мс; None = мёртв / не проверялся
-    speed: float = 0.0             # Мбит/с
+    speed: float = 0.0             # Мбит/с, свежий замер (0 = не замерялся)
     cc: str = ''                   # страна выхода
+    shown: float = 0.0             # скорость для имени: медиана последних замеров, округлённая
+    tier: str = 'new'              # 'proven' | 'known' | 'new' — по истории живости
 
 
 def parse_vless(raw: str) -> Node | None:
@@ -593,7 +617,9 @@ def fetch_source(src: Source) -> list[str]:
 
 
 def key_name(src: Source, n: Node) -> str:
-    return f'{cc_flag(n.cc)} {cc_name(n.cc)} - {TAGS[src.tag][0]} - {fmt_speed(n.speed)}'
+    """Флаг — первым (Happ рисует по нему иконку). Важное — слева: хвост строки Happ обрезает."""
+    icon = '💎' if n.tier == 'proven' else speed_icon(n.shown)
+    return f'{cc_flag(n.cc)} {icon} {fmt_speed(n.shown)} · {TAGS[src.tag][0]} · {cc_name(n.cc)}'
 
 
 def build_header() -> str:
@@ -638,12 +664,108 @@ def publish(content: str, count: int) -> bool:
     return False
 
 
+# ═══════════════════════════════ ПАМЯТЬ: ДОЛГОВЕЧНОСТЬ ═══════════════════════════════
+
+class State:
+    """Как давно и как стабильно жив каждый ключ. Лежит в state.json (в Actions — через cache).
+    Ключи храним по хэшу, историю — строкой из 1/0 (последняя проверка справа)."""
+
+    def __init__(self, keys: dict | None = None):
+        self.keys: dict[str, dict] = keys or {}
+
+    @staticmethod
+    def kid(uri: str) -> str:
+        return hashlib.sha1(uri.encode()).hexdigest()[:12]
+
+    @classmethod
+    def load(cls) -> 'State':
+        try:
+            data = json.loads(Path(STATE_FILE).read_text(encoding='utf-8'))
+            if data.get('v') == 1 and isinstance(data.get('keys'), dict):
+                return cls(data['keys'])
+        except (OSError, ValueError, AttributeError):
+            pass
+        return cls()
+
+    def save(self, now: int) -> None:
+        keep = {k: v for k, v in self.keys.items() if now - v.get('seen', 0) < PRUNE_DAYS * 86400}
+        path = Path(STATE_FILE)
+        tmp = path.with_name(path.name + '.tmp')
+        tmp.write_text(json.dumps({'v': 1, 'updated': now, 'keys': keep}, separators=(',', ':')),
+                       encoding='utf-8')
+        os.replace(tmp, path)
+
+    def _e(self, uri: str) -> dict:
+        return self.keys.get(self.kid(uri), {})
+
+    def history(self, uri: str) -> str:
+        return self._e(uri).get('h', '')
+
+    def was_alive(self, uri: str) -> bool:
+        return self.history(uri).endswith('1')
+
+    def uptime(self, uri: str) -> float:
+        h = self.history(uri)
+        return h.count('1') / len(h) if h else 0.0
+
+    def flapping(self, uri: str) -> bool:
+        return len(self.history(uri)) >= FLAP_MIN_CHECKS and self.uptime(uri) < MIN_UPTIME
+
+    def tier(self, uri: str) -> str:
+        n = len(self.history(uri))
+        if n >= PROVEN_MIN_CHECKS and self.uptime(uri) >= PROVEN_MIN_UPTIME:
+            return 'proven'
+        return 'known' if n >= FLAP_MIN_CHECKS else 'new'
+
+    def speed(self, uri: str) -> float:
+        samples = self._e(uri).get('s') or []
+        return float(statistics.median(samples)) if samples else 0.0
+
+    def record(self, uri: str, ok: bool, speed: float, now: int) -> None:
+        e = self.keys.setdefault(self.kid(uri), {'first': now, 'h': '', 's': []})
+        e['seen'] = now
+        e['h'] = (e['h'] + ('1' if ok else '0'))[-HISTORY_LEN:]
+        if ok and speed > 0:
+            e['s'] = (e['s'] + [round(speed, 1)])[-SPEED_SAMPLES:]
+
+
+def select_rows(per_source: list[tuple[Source, list[Node]]], measured: set[str],
+                state: State, now: int) -> tuple[list[tuple[Source, Node]], int]:
+    """Пишем итоги проверки в память и решаем, что публиковать. → (строки, отброшено «мигающих»)."""
+    for n in {n.uri: n for _, nodes in per_source for n in nodes}.values():
+        was_measured = n.uri in measured
+        ok = n.latency is not None and (not was_measured or n.speed >= SPEED_MIN_MBPS)
+        state.record(n.uri, ok, n.speed if was_measured else 0.0, now)
+
+    rows: list[tuple[Source, Node]] = []
+    flaky: set[str] = set()
+    for src, nodes in per_source:
+        pool = []
+        for n in nodes:
+            if n.latency is None or n.speed < SPEED_MIN_MBPS:
+                continue
+            if state.flapping(n.uri):
+                flaky.add(n.uri)
+                continue
+            n.tier = state.tier(n.uri)
+            n.shown = round_speed(state.speed(n.uri) or n.speed)
+            pool.append(n)
+        pool.sort(key=lambda n: (-n.shown * TRUST[n.tier], n.uri))      # новичкам скидка при отборе
+        rows += [(src, n) for n in (pool if src.top is None else pool[:src.top])]
+    rows.sort(key=lambda r: (TAGS[r[0].tag][1] if GROUP_BY_TYPE else 0,
+                             -r[1].shown, r[1].tier != 'proven', r[1].uri))
+    return rows, len(flaky)
+
+
 # ═══════════════════════════════ MAIN ═══════════════════════════════
 
 def main() -> int:
     log('⚡ SPECTER · живые ключи + скорость')
     xray = ensure_xray()
     log(f'xray: {xray_version(xray)}')
+    state = State.load()
+    now = int(time.time())
+    log(f'память: {len(state.keys)} ключей в истории')
 
     # 1) загрузка
     log('1/3 источники')
@@ -674,7 +796,13 @@ def main() -> int:
     # 2) живые?
     log(f'2/3 проверка {len(uniq)} ключей через xray')
     t = time.time()
-    alive = check_alive(xray, uniq)
+    check_alive(xray, uniq)
+    retry = [n for n in uniq if n.latency is None and state.was_alive(n.uri)]
+    if retry:                                    # вчера жил, сейчас нет — возможно, разовый сбой: даём второй шанс
+        log(f'  второй шанс для {len(retry)} ранее живых ключей …')
+        time.sleep(3)
+        check_alive(xray, retry)
+    alive = sum(n.latency is not None for n in uniq)
     log(f'  живых {alive}/{len(uniq)} ({alive * 100 // len(uniq)}%) за {time.time() - t:.0f} с')
     for src, nodes in per_source:
         if nodes:
@@ -683,7 +811,8 @@ def main() -> int:
     # 3) страна выхода + скорость (только лучшие по пингу кандидаты)
     candidates: dict[str, Node] = {}
     for src, nodes in per_source:
-        live = sorted((n for n in nodes if n.latency is not None), key=lambda n: n.latency)
+        live = sorted((n for n in nodes if n.latency is not None),
+                      key=lambda n: (state.tier(n.uri) != 'proven', n.latency))   # долгожители — вне очереди
         for n in (live if src.top is None else live[:src.top * SPEED_PREPICK]):
             candidates[n.uri] = n
     log(f'3/3 страна и скорость: {len(candidates)} кандидатов')
@@ -691,16 +820,12 @@ def main() -> int:
     enrich(xray, list(candidates.values()))
     log(f'  готово за {time.time() - t:.0f} с')
 
-    # итог: топ по скорости в каждом источнике → общая сортировка
-    rows: list[tuple[Source, Node]] = []
-    for src, nodes in per_source:
-        good = sorted((n for n in nodes if n.speed >= SPEED_MIN_MBPS), key=lambda n: -n.speed)
-        rows += [(src, n) for n in (good if src.top is None else good[:src.top])]
-    rows.sort(key=lambda r: (TAGS[r[0].tag][1] if GROUP_BY_TYPE else 0, -r[1].speed))
-
+    # итог: память + отбор (мигающих отсекаем, новичкам скидка) → общая сортировка
+    rows, flaky = select_rows(per_source, set(candidates), state, now)
     if len(rows) < MIN_KEYS_TO_PUBLISH:
-        log(f'✗ живых ключей всего {len(rows)} (< {MIN_KEYS_TO_PUBLISH}) — keys.txt не трогаю')
+        log(f'✗ живых ключей всего {len(rows)} (< {MIN_KEYS_TO_PUBLISH}) — keys.txt и память не трогаю')
         return 1
+    state.save(now)
 
     lines = [f'{n.uri}#{quote(key_name(src, n), safe="")}' for src, n in rows]
     content = build_header() + '\n' + '\n'.join(lines) + '\n'
@@ -711,6 +836,9 @@ def main() -> int:
             log(f'⚠ {TAGS[tag][0]}: живых не нашлось. Если это ключи под белые списки РФ — '
                 f'с зарубежного раннера их часто не проверить (нужен раннер в РФ)')
     log(f'ИТОГО {len(rows)} ключей: WiFi {by_tag["wifi"]} · LTE {by_tag["lte"]} · SNI {by_tag["sni"]}')
+    tiers = [n.tier for _, n in rows]
+    log(f'  💎 проверенных {tiers.count("proven")} · обычных {tiers.count("known")} · новых {tiers.count("new")}'
+        + (f' · мигающих отброшено {flaky}' if flaky else ''))
     for src, n in rows[:5]:
         log(f'  {key_name(src, n)}')
 
